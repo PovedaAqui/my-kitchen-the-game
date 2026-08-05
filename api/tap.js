@@ -25,10 +25,12 @@ module.exports = async (req, res) => {
   if (p.finished) { await hset(key, pk, p); return send(res, 200, { ok: true, finished: true, score: p.score, finishMs: p.finishMs }); }
 
   const startedAt = fields.meta.startedAt;
+  const order = fields.meta.order || RECIPE.map((r) => r.id); // fallback: canonical order
+  const expectedId = order[p.step];
   let result;
-  if (stepId === p.step) {
+  if (stepId === expectedId) {
     p.step += 1;
-    if (p.step >= RECIPE.length) {
+    if (p.step >= order.length) {
       p.finished = true;
       p.finishMs = Date.now() - startedAt;
       p.score = computeScore(p.finishMs, p.penalties);
