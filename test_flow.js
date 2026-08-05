@@ -1,90 +1,76 @@
-const { io } = require('socket.io-client');
-const URL = 'http://localhost:3000';
-
-function conn() { return io(URL, { transports: ['websocket'], forceNew: true }); }
+/** End-to-end test against the local dev server (in-memory store fallback). */
+const BASE = process.env.BASE || 'http://localhost:3000';
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const post = (p, b) => fetch(BASE + p, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }).then(r => r.json());
+const get = (p) => fetch(BASE + p).then(r => r.json());
 
 (async () => {
   let fail = 0;
   const log = (ok, msg) => { console.log((ok ? 'PASS' : 'FAIL') + ' - ' + msg); if (!ok) fail++; };
 
-  // 1. Host creates room
-  const host = conn();
-  const created = await new Promise(res => host.emit('host:create', {}, res));
-  log(created.code && created.code.length === 4, 'host created room ' + created.code);
+  // 1. Create room
+  const created = await post('/api/create', {});
+  log(created.code && created.code.length === 4, 'created room ' + created.code);
   log(!!created.qr && created.qr.startsWith('data:image'), 'QR data URL generated');
   log(created.maxPlayers === 10, 'max players = 10');
   const code = created.code;
 
-  let lastState = null;
-  host.on('room:update', s => { lastState = s; });
-
   // 2. Join 10 players
-  const players = [];
+  const ids = [];
   for (let i = 0; i < 10; i++) {
-    const p = conn();
-    const r = await new Promise(res => p.emit('player:join', { code, name: 'Cook' + (i+1) }, res));
-    if (!r.ok) log(false, 'player ' + (i+1) + ' join: ' + r.error);
-    players.push(p);
+    const r = await post('/api/join', { code, name: 'Cook' + (i+1) });
+    if (!r.ok) log(false, 'join ' + (i+1) + ': ' + r.error); else ids.push(r.playerId);
   }
-  log(players.length === 10, 'joined 10 players');
+  log(ids.length === 10, 'joined 10 players');
 
-  // 3. 11th player rejected
-  const p11 = conn();
-  const r11 = await new Promise(res => p11.emit('player:join', { code, name: 'Overflow' }, res));
+  // 3. 11th rejected
+  const r11 = await post('/api/join', { code, name: 'Overflow' });
   log(!r11.ok && /full/i.test(r11.error), '11th player rejected: "' + r11.error + '"');
-  p11.close();
 
-  // 4. Host sees 10 in leaderboard
-  await wait(200);
-  log(lastState && lastState.players.length === 10, 'host leaderboard shows 10 cooks');
+  // 4. State shows 10 in lobby
+  let st = await get('/api/state?code=' + code);
+  log(st.ok && st.players.length === 10 && st.phase === 'lobby', 'state: 10 cooks in lobby');
 
-  // 5. Start game; players receive recipe
-  const recipes = [];
-  players.forEach(p => p.on('game:start', ({ recipe }) => recipes.push(recipe)));
-  const finishes = {};
-  players.forEach((p, i) => p.on('player:finished', d => { finishes[i] = d; }));
-  let gameOver = null;
-  host.on('game:over', s => { gameOver = s; });
+  // 5. Start
+  const started = await post('/api/start', { code });
+  log(started.ok && started.startedAt > 0, 'game started');
+  st = await get('/api/state?code=' + code);
+  log(st.phase === 'playing' && st.recipe.length === 10, 'phase playing, 10-step recipe present');
 
-  host.emit('host:start');
-  await wait(300);
-  log(recipes.length === 10 && recipes[0].length === 10, 'all 10 players got 10-step recipe');
+  // 6. Wrong tap = penalty, no advance
+  const wrong = await post('/api/tap', { code, playerId: ids[0], stepId: 5 });
+  log(wrong.ok && wrong.wrong && wrong.penalties === 1 && wrong.step === 0, 'wrong tap penalized, step stays 0');
 
-  // 6. Simulate cooking. Player 0 is fast & perfect; player 5 makes 2 mistakes; rest normal.
-  const recipe = recipes[0];
-  async function cook(p, idx, { mistakes = 0, stepDelay = 0 } = {}) {
-    // make `mistakes` wrong taps first
-    for (let m = 0; m < mistakes; m++) {
-      p.emit('player:tap', { stepId: 9 }); // wrong (not step 0)
-      await wait(10);
-    }
-    for (let s = 0; s < recipe.length; s++) {
-      p.emit('player:tap', { stepId: s });
-      if (stepDelay) await wait(stepDelay);
-    }
+  // 7. Player 0 cooks clean and fast
+  for (let s = 0; s < 10; s++) {
+    var res0 = await post('/api/tap', { code, playerId: ids[0], stepId: s });
   }
+  log(res0.finished && res0.penalties === 1, 'player 0 finished (1 earlier penalty), score=' + res0.score);
 
-  // Fastest: player 0, no delay, no mistakes
-  await cook(players[0], 0, {});
-  await wait(50);
-  // Player 5: 2 mistakes
-  await cook(players[5], 5, { mistakes: 2 });
-  // Everyone else
-  for (let i = 1; i < 10; i++) { if (i === 5) continue; await cook(players[i], i, {}); }
+  // 8. Player 5 makes 2 wrong taps then finishes
+  await post('/api/tap', { code, playerId: ids[5], stepId: 9 });
+  await post('/api/tap', { code, playerId: ids[5], stepId: 3 });
+  let res5;
+  for (let s = 0; s < 10; s++) res5 = await post('/api/tap', { code, playerId: ids[5], stepId: s });
+  log(res5.finished && res5.penalties === 2, 'player 5 finished with 2 penalties, score=' + res5.score);
+  log(res0.score > res5.score, 'faster/cleaner player 0 outscored player 5 (' + res0.score + ' > ' + res5.score + ')');
 
-  await wait(500);
-
-  log(Object.keys(finishes).length === 10, 'all 10 players finished (' + Object.keys(finishes).length + ')');
-  log(finishes[0] && finishes[0].penalties === 0, 'player 0 finished clean, score=' + (finishes[0] && finishes[0].score));
-  log(finishes[5] && finishes[5].penalties === 2, 'player 5 has 2 penalties, score=' + (finishes[5] && finishes[5].score));
-  log(finishes[0].score > finishes[5].score, 'clean player scored higher than penalized player');
-  log(gameOver && gameOver.phase === 'finished', 'game reached finished phase');
-  log(gameOver && gameOver.players[0].finished, 'leaderboard sorted: winner=' + (gameOver && gameOver.players[0].name) + ' @ ' + (gameOver && (gameOver.players[0].finishMs/1000).toFixed(2)) + 's');
-
-  // 7. Wrong tap during play doesn't advance
-  host.close(); players.forEach(p => p.close());
+  // 9. Remaining players finish -> room goes finished
+  for (let i = 1; i < 10; i++) {
+    if (i === 5) continue;
+    for (let s = 0; s < 10; s++) await post('/api/tap', { code, playerId: ids[i], stepId: s });
+  }
   await wait(100);
+  st = await get('/api/state?code=' + code);
+  log(st.phase === 'finished', 'room reached finished phase');
+  log(st.players.filter(p => p.finished).length === 10, 'all 10 players finished');
+  log(st.players[0].finished, 'leaderboard sorted, top = ' + st.players[0].name + ' @ ' + (st.players[0].finishMs/1000).toFixed(2) + 's · ' + st.players[0].score + 'pts');
+
+  // 10. Reset -> lobby
+  await post('/api/reset', { code });
+  st = await get('/api/state?code=' + code);
+  log(st.phase === 'lobby' && st.players.every(p => p.step === 0 && !p.finished), 'reset returns room to fresh lobby');
+
   console.log('\n' + (fail === 0 ? 'ALL TESTS PASSED' : fail + ' TEST(S) FAILED'));
   process.exit(fail === 0 ? 0 : 1);
 })();

@@ -1,18 +1,17 @@
 {
   "name": "my-kitchen-the-game",
-  "version": "1.0.0",
-  "description": "Gallo Pinto Cook-Off — a real-time multiplayer party game where players scan a QR code and race to cook Nicaragua's traditional gallo pinto.",
-  "main": "server.js",
+  "version": "2.0.0",
+  "description": "Gallo Pinto Cook-Off — a real-time multiplayer party game where players scan a QR code and race to cook Nicaragua's traditional gallo pinto. Vercel-native (serverless functions + Upstash Redis).",
+  "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node dev-server.js",
+    "test": "node test_flow.js"
   },
-  "keywords": ["game", "multiplayer", "socket.io", "gallo-pinto", "nicaragua", "qr", "party-game"],
+  "keywords": ["game", "multiplayer", "vercel", "serverless", "upstash", "gallo-pinto", "nicaragua", "qr", "party-game"],
   "license": "MIT",
   "dependencies": {
-    "express": "^4.19.2",
-    "qrcode": "^1.5.4",
-    "socket.io": "^4.7.5"
+    "@upstash/redis": "^1.34.3",
+    "qrcode": "^1.5.4"
   }
 }

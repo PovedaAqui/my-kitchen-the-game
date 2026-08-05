@@ -6,21 +6,14 @@
 <title>Gallo Pinto Cook-Off — Host</title>
 <style>
   :root {
-    --bg: #1a1207;
-    --card: #241a0c;
-    --accent: #e8a13a;
-    --accent2: #b23a2e;
-    --green: #4f9d4f;
-    --text: #f6ead4;
-    --muted: #b8a677;
+    --bg: #1a1207; --card: #241a0c; --accent: #e8a13a; --accent2: #b23a2e;
+    --green: #4f9d4f; --text: #f6ead4;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
     background: radial-gradient(circle at 20% 10%, #2b1e0c, var(--bg));
-    color: var(--text);
-    min-height: 100vh;
-    padding: 24px;
+    color: var(--text); min-height: 100vh; padding: 24px;
   }
   header { text-align: center; margin-bottom: 18px; }
   h1 { font-size: 2.4rem; color: var(--accent); letter-spacing: .5px; }
@@ -28,36 +21,19 @@
   .sub { color: #c9b48c; margin-top: 4px; font-size: 1rem; }
   .wrap { display: grid; grid-template-columns: 340px 1fr; gap: 24px; max-width: 1100px; margin: 0 auto; }
   @media (max-width: 780px){ .wrap{ grid-template-columns: 1fr; } }
-  .card {
-    background: var(--card);
-    border: 1px solid #3a2c14;
-    border-radius: 16px;
-    padding: 22px;
-    box-shadow: 0 8px 30px rgba(0,0,0,.4);
-  }
+  .card { background: var(--card); border: 1px solid #3a2c14; border-radius: 16px; padding: 22px; box-shadow: 0 8px 30px rgba(0,0,0,.4); }
   .join-card { text-align: center; }
   .qr { background:#fff; padding:12px; border-radius:12px; display:inline-block; min-height:280px; }
   .qr img { display:block; width:280px; height:280px; }
-  .code {
-    font-size: 2.6rem; font-weight: 800; letter-spacing: 8px;
-    color: var(--accent); margin: 14px 0 4px;
-  }
+  .code { font-size: 2.6rem; font-weight: 800; letter-spacing: 8px; color: var(--accent); margin: 14px 0 4px; }
   .joinurl { font-size:.85rem; color:#c9b48c; word-break: break-all; }
   .count { margin-top: 10px; font-size: 1rem; color: var(--green); font-weight:600; }
-  button {
-    font-family: inherit; cursor: pointer; border: none; border-radius: 10px;
-    padding: 14px 22px; font-size: 1.1rem; font-weight: 700; margin-top: 16px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1a1207;
-    transition: transform .08s ease, opacity .2s;
-  }
+  button { font-family: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 14px 22px; font-size: 1.1rem; font-weight: 700; margin-top: 16px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1a1207; transition: transform .08s ease, opacity .2s; }
   button:hover { transform: translateY(-2px); }
   button:disabled { opacity: .45; cursor: not-allowed; transform:none; }
   button.secondary { background:#3a2c14; color: var(--text); }
   .board h2 { color: var(--accent); margin-bottom: 12px; font-size: 1.4rem; }
-  .player-row {
-    display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px;
-    background:#2c2010; margin-bottom:8px; transition: background .3s;
-  }
+  .player-row { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; background:#2c2010; margin-bottom:8px; transition: background .3s; }
   .rank { width:32px; text-align:center; font-weight:800; font-size:1.2rem; color:var(--accent); }
   .pname { flex:0 0 130px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .bar-wrap { flex:1; background:#150f06; border-radius:8px; height:22px; overflow:hidden; position:relative; }
@@ -96,58 +72,61 @@
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
-    let recipeLength = 10;
+    const $ = (id) => document.getElementById(id);
+    let code = null;
     let phase = 'lobby';
 
-    socket.on('connect', () => {
-      socket.emit('host:create', {}, (res) => {
-        recipeLength = res.recipeLength;
-        document.getElementById('code').textContent = res.code;
-        document.getElementById('joinurl').textContent = res.joinUrl;
-        const qrBox = document.getElementById('qrBox');
-        if (res.qr) {
-          qrBox.innerHTML = '<img src="' + res.qr + '" alt="Join QR code" />';
-        } else {
-          qrBox.innerHTML = '<span style="color:#333">Open:<br>' + res.joinUrl + '</span>';
-        }
-      });
-    });
+    async function api(path, opts) {
+      const r = await fetch(path, opts);
+      return r.json();
+    }
 
-    const startBtn = document.getElementById('startBtn');
-    const resetBtn = document.getElementById('resetBtn');
-    startBtn.onclick = () => socket.emit('host:start');
-    resetBtn.onclick = () => socket.emit('host:reset');
+    async function boot() {
+      const res = await api('/api/create', { method: 'POST' });
+      code = res.code;
+      $('code').textContent = res.code;
+      $('joinurl').textContent = res.joinUrl;
+      const qrBox = $('qrBox');
+      if (res.qr) qrBox.innerHTML = '<img src="' + res.qr + '" alt="Join QR code" />';
+      else qrBox.innerHTML = '<span style="color:#333">Open:<br>' + res.joinUrl + '</span>';
+      poll();
+      setInterval(poll, 700);
+    }
 
-    socket.on('game:start', () => {
-      phase = 'playing';
-      document.getElementById('boardTitle').textContent = 'Cooking in progress…';
-      startBtn.style.display = 'none';
-      document.getElementById('winnerBox').innerHTML = '';
-    });
+    $('startBtn').onclick = async () => {
+      $('startBtn').disabled = true;
+      const r = await api('/api/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code }) });
+      if (!r.ok) { $('startBtn').disabled = false; alert(r.error); }
+    };
+    $('resetBtn').onclick = async () => {
+      await api('/api/reset', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code }) });
+    };
 
-    socket.on('game:over', (state) => {
-      phase = 'finished';
-      renderBoard(state, true);
-    });
-
-    socket.on('room:update', (state) => {
+    async function poll() {
+      if (!code) return;
+      let state;
+      try { state = await api('/api/state?code=' + code); } catch { return; }
+      if (!state.ok) return;
       phase = state.phase;
-      renderBoard(state, phase === 'finished');
+      renderBoard(state);
       const n = state.players.length;
-      document.getElementById('count').textContent = n + ' / 10 cooks joined';
+      $('count').textContent = n + ' / 10 cooks joined';
       if (phase === 'lobby') {
-        startBtn.disabled = n === 0;
-        startBtn.style.display = '';
-        resetBtn.style.display = 'none';
-        document.getElementById('boardTitle').textContent = 'Kitchen Lobby';
+        $('startBtn').disabled = n === 0;
+        $('startBtn').style.display = '';
+        $('resetBtn').style.display = 'none';
+        $('boardTitle').textContent = 'Kitchen Lobby';
+        $('winnerBox').innerHTML = '';
+      } else if (phase === 'playing') {
+        $('boardTitle').textContent = 'Cooking in progress…';
+        $('startBtn').style.display = 'none';
       }
-    });
+    }
 
-    function renderBoard(state, showWinner) {
-      const el = document.getElementById('players');
+    function renderBoard(state) {
+      const showWinner = state.phase === 'finished';
+      const el = $('players');
       if (!state.players.length) {
         el.innerHTML = '<div class="empty">Waiting for cooks to scan the QR…</div>';
         return;
@@ -157,32 +136,30 @@
         let badge;
         if (!p.connected) badge = '<span class="badge off">left</span>';
         else if (p.finished) badge = '<span class="badge done">' + (p.finishMs/1000).toFixed(1) + 's · ' + p.score + 'pts</span>';
-        else if (phase === 'playing') badge = '<span class="badge cooking">' + p.step + '/' + p.total + '</span>';
+        else if (state.phase === 'playing') badge = '<span class="badge cooking">' + p.step + '/' + p.total + '</span>';
         else badge = '<span class="badge cooking">ready</span>';
         const medal = showWinner && p.finished ? (['🥇','🥈','🥉'][i] || (i+1)+'.') : (i+1);
-        return '<div class="player-row">'
-          + '<div class="rank">' + medal + '</div>'
+        return '<div class="player-row"><div class="rank">' + medal + '</div>'
           + '<div class="pname">' + escapeHtml(p.name) + '</div>'
           + '<div class="bar-wrap"><div class="bar" style="width:' + pct + '%"></div>'
-          + '<span class="bar-label">' + pct + '%</span></div>'
-          + badge + '</div>';
+          + '<span class="bar-label">' + pct + '%</span></div>' + badge + '</div>';
       }).join('');
 
       if (showWinner) {
         const winner = state.players.find(p => p.finished);
-        const wb = document.getElementById('winnerBox');
         if (winner) {
-          wb.innerHTML = '<div class="winner"><div>🏆 Winner</div><div class="big">'
+          $('winnerBox').innerHTML = '<div class="winner"><div>🏆 Winner</div><div class="big">'
             + escapeHtml(winner.name) + '</div><div>' + (winner.finishMs/1000).toFixed(1)
             + 's · ' + winner.score + ' points</div></div>';
         }
-        document.getElementById('boardTitle').textContent = 'Final Results';
-        resetBtn.style.display = '';
-        startBtn.style.display = 'none';
+        $('boardTitle').textContent = 'Final Results';
+        $('resetBtn').style.display = '';
+        $('startBtn').style.display = 'none';
       }
     }
 
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    boot();
   </script>
 </body>
 </html>
