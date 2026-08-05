@@ -38,6 +38,8 @@
   .finish { text-align:center; padding:20px; }
   .finish .big { font-size:2.2rem; color:#e8a13a; font-weight:800; }
   .finish .medal { font-size:3.5rem; }
+  .share-btn { width:auto; padding:12px 24px; margin-top:16px; background:linear-gradient(135deg,#4f9d4f,#3a7d3a); color:#fff; }
+  .share-hint { color:#7bc47b; font-size:.85rem; min-height:1.1em; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -79,6 +81,8 @@
       <div>Gallo pinto served!</div>
       <div class="big" id="finTime">0.0s</div>
       <div id="finScore" style="color:#c9b48c;margin-top:6px"></div>
+      <button id="shareBtn" class="share-btn">📤 Share my score</button>
+      <div class="share-hint" id="shareHint"></div>
       <div class="status" id="finWait">Waiting for the other cooks to finish…</div>
     </div>
   </div>
@@ -90,6 +94,7 @@
     if (preRoom) $('room').value = preRoom;
 
     let code = null, playerId = null;
+    let myFinish = { sec: null, score: null, rank: null }; // for the share button
     let recipe = [], order = [], myStep = 0, startedAt = 0, finished = false;
     let timerInt = null, pollInt = null, lastPhase = 'lobby';
 
@@ -147,6 +152,7 @@
         const nextIn = state.endedAt ? Math.max(0, Math.ceil((state.endedAt + 15000 - (state.serverNow || Date.now())) / 1000)) : null;
         const tail = nextIn != null ? ' Next round in ' + nextIn + 's…' : '';
         if (rank >= 0) {
+          myFinish.rank = rank + 1;
           $('finMedal').textContent = ['🥇','🥈','🥉'][rank] || '🍽️';
           $('finWait').textContent = (rank === 0 ? '🏆 You won! First to serve!' : 'You placed #' + (rank+1) + '. Nicely cooked!') + tail;
         } else {
@@ -169,6 +175,7 @@
         if (timerInt) clearInterval(timerInt);
         $('finTime').textContent = (r.finishMs/1000).toFixed(1) + 's';
         $('finScore').textContent = r.score + ' points';
+        myFinish.sec = (r.finishMs/1000).toFixed(1); myFinish.score = r.score;
         renderNext(); show('finishCard');
       } else {
         myStep = r.step; renderNext(); renderGrid();
@@ -204,6 +211,33 @@
       $(id).classList.remove('hidden');
     }
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // Share score via native share sheet (mobile) or clipboard fallback (desktop).
+    $('shareBtn').onclick = async () => {
+      const url = location.origin + '/play';
+      const rankPart = myFinish.rank ? (myFinish.rank === 1 ? ' and WON 🥇' : ' (placed #' + myFinish.rank + ')') : '';
+      const scorePart = myFinish.score != null ? myFinish.score + ' pts' : '';
+      const timePart = myFinish.sec != null ? ' in ' + myFinish.sec + 's' : '';
+      const text = '🇳🇮 I cooked gallo pinto' + timePart + ' for ' + scorePart + rankPart
+        + ' in the Gallo Pinto Cook-Off! Can you beat me? 🍳🔥';
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: 'Gallo Pinto Cook-Off', text, url });
+          $('shareHint').textContent = 'Thanks for sharing! 🎉';
+        } else {
+          await navigator.clipboard.writeText(text + ' ' + url);
+          $('shareHint').textContent = '📋 Copied to clipboard — paste it to your friends!';
+        }
+      } catch (e) {
+        // User cancelled the share sheet, or clipboard blocked — offer manual copy.
+        try {
+          await navigator.clipboard.writeText(text + ' ' + url);
+          $('shareHint').textContent = '📋 Copied to clipboard!';
+        } catch (_) {
+          $('shareHint').textContent = 'Share: ' + url;
+        }
+      }
+    };
   </script>
 </body>
 </html>
