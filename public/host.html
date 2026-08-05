@@ -28,6 +28,8 @@
   .code { font-size: 2.6rem; font-weight: 800; letter-spacing: 8px; color: var(--accent); margin: 14px 0 4px; }
   .joinurl { font-size:.85rem; color:#c9b48c; word-break: break-all; }
   .count { margin-top: 10px; font-size: 1rem; color: var(--green); font-weight:600; }
+  .countdown { margin-top: 8px; font-size: 1.5rem; font-weight: 800; color: var(--accent); min-height: 1.5rem; }
+  .countdown .num { font-size: 2rem; }
   button { font-family: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 14px 22px; font-size: 1.1rem; font-weight: 700; margin-top: 16px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #1a1207; transition: transform .08s ease, opacity .2s; }
   button:hover { transform: translateY(-2px); }
   button:disabled { opacity: .45; cursor: not-allowed; transform:none; }
@@ -61,7 +63,8 @@
       <div class="code" id="code">····</div>
       <div class="joinurl" id="joinurl"></div>
       <div class="count" id="count">0 / 10 cooks joined</div>
-      <button id="startBtn" disabled>Start Cooking!</button>
+      <div class="countdown" id="countdown"></div>
+      <button id="startBtn" disabled>Start now</button>
       <button id="resetBtn" class="secondary" style="display:none">New Round</button>
     </div>
 
@@ -116,11 +119,19 @@
         $('startBtn').disabled = n === 0;
         $('startBtn').style.display = '';
         $('resetBtn').style.display = 'none';
-        $('boardTitle').textContent = 'Kitchen Lobby';
-        $('winnerBox').innerHTML = '';
+        if (state.countdownMs != null) {
+          const secs = Math.ceil(state.countdownMs / 1000);
+          $('countdown').innerHTML = 'Auto-start in <span class="num">' + secs + '</span>s';
+          $('boardTitle').textContent = 'Kitchen Lobby — cooks, get ready!';
+        } else {
+          $('countdown').textContent = '';
+          $('boardTitle').textContent = 'Kitchen Lobby';
+        }
       } else if (phase === 'playing') {
+        $('countdown').textContent = '';
         $('boardTitle').textContent = 'Cooking in progress…';
         $('startBtn').style.display = 'none';
+        $('resetBtn').style.display = 'none';
       }
     }
 
@@ -148,13 +159,19 @@
       if (showWinner) {
         const winner = state.players.find(p => p.finished);
         if (winner) {
+          const nextIn = state.endedAt ? Math.max(0, Math.ceil((state.endedAt + 15000 - (state.serverNow || Date.now())) / 1000)) : null;
           $('winnerBox').innerHTML = '<div class="winner"><div>🏆 Winner</div><div class="big">'
             + escapeHtml(winner.name) + '</div><div>' + (winner.finishMs/1000).toFixed(1)
-            + 's · ' + winner.score + ' points</div></div>';
+            + 's · ' + winner.score + ' points</div>'
+            + (nextIn != null ? '<div style="margin-top:8px;color:#c9b48c">Next round in ' + nextIn + 's…</div>' : '')
+            + '</div>';
         }
         $('boardTitle').textContent = 'Final Results';
-        $('resetBtn').style.display = '';
+        $('countdown').textContent = '';
+        $('resetBtn').style.display = 'none';
         $('startBtn').style.display = 'none';
+      } else if (state.phase === 'lobby') {
+        $('winnerBox').innerHTML = '';
       }
     }
 

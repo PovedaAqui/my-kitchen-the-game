@@ -55,7 +55,8 @@
 
   <div class="card hidden" id="lobbyCard">
     <div class="status">✅ You're in as <b id="myName"></b>!</div>
-    <div class="status">Waiting for the host to start the round…<br>Get ready to cook! 🔥</div>
+    <div class="status" id="lobbyMsg">Waiting for more cooks…<br>Get ready to cook! 🔥</div>
+    <div class="timer" id="lobbyCountdown" style="font-size:2rem"></div>
   </div>
 
   <div class="card hidden" id="gameCard">
@@ -111,28 +112,45 @@
     async function poll() {
       if (!code) return;
       let state;
-      try { state = await api('/api/state?code=' + code); } catch { return; }
+      try { state = await api('/api/state?code=' + code + '&playerId=' + playerId); } catch { return; }
       if (!state.ok) return;
 
       if (state.phase === 'playing' && lastPhase !== 'playing') {
         recipe = state.recipe; startedAt = state.startedAt; finished = false;
         const me = state.players.find(p => p.id === playerId);
         myStep = me ? me.step : 0;
+        $('penalty').textContent = '';
         renderGrid(); renderNext(); show('gameCard');
         if (timerInt) clearInterval(timerInt);
         timerInt = setInterval(updateTimer, 100);
       }
-      if (state.phase === 'lobby' && lastPhase !== 'lobby') {
-        finished = false; myStep = 0;
-        if (timerInt) clearInterval(timerInt);
-        show('lobbyCard');
+      if (state.phase === 'lobby') {
+        if (lastPhase !== 'lobby') {
+          finished = false; myStep = 0;
+          if (timerInt) clearInterval(timerInt);
+          show('lobbyCard');
+        }
+        // Live countdown to auto-start.
+        if (state.countdownMs != null) {
+          const secs = Math.ceil(state.countdownMs / 1000);
+          $('lobbyCountdown').textContent = '⏱️ ' + secs + 's';
+          $('lobbyMsg').innerHTML = 'Round starts automatically…<br>Get those thumbs ready! 🔥';
+        } else {
+          $('lobbyCountdown').textContent = '';
+          $('lobbyMsg').innerHTML = 'Waiting for more cooks…<br>Get ready to cook! 🔥';
+        }
       }
       if (state.phase === 'finished') {
+        if (lastPhase !== 'finished') show('finishCard');
         const finishers = state.players.filter(p => p.finished);
         const rank = finishers.findIndex(p => p.id === playerId);
+        const nextIn = state.endedAt ? Math.max(0, Math.ceil((state.endedAt + 15000 - (state.serverNow || Date.now())) / 1000)) : null;
+        const tail = nextIn != null ? ' Next round in ' + nextIn + 's…' : '';
         if (rank >= 0) {
           $('finMedal').textContent = ['🥇','🥈','🥉'][rank] || '🍽️';
-          $('finWait').textContent = rank === 0 ? '🏆 You won! First to serve!' : 'You placed #' + (rank+1) + '. Nicely cooked!';
+          $('finWait').textContent = (rank === 0 ? '🏆 You won! First to serve!' : 'You placed #' + (rank+1) + '. Nicely cooked!') + tail;
+        } else {
+          $('finWait').textContent = 'Round over.' + tail;
         }
       }
       lastPhase = state.phase;

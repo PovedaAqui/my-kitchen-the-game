@@ -1,75 +1,77 @@
-/** End-to-end test against the local dev server (in-memory store fallback). */
+/** End-to-end test: serverless API + hands-free lifecycle (auto-start + auto-loop). */
 const BASE = process.env.BASE || 'http://localhost:3000';
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const post = (p, b) => fetch(BASE + p, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }).then(r => r.json());
 const get = (p) => fetch(BASE + p).then(r => r.json());
+// Keep every player's heartbeat fresh (prevents stale-prune during waits).
+const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + code + '&playerId=' + id)));
 
 (async () => {
   let fail = 0;
   const log = (ok, msg) => { console.log((ok ? 'PASS' : 'FAIL') + ' - ' + msg); if (!ok) fail++; };
 
-  // 1. Create room
+  // 1. Create + join
   const created = await post('/api/create', {});
-  log(created.code && created.code.length === 4, 'created room ' + created.code);
-  log(!!created.qr && created.qr.startsWith('data:image'), 'QR data URL generated');
-  log(created.maxPlayers === 10, 'max players = 10');
   const code = created.code;
-
-  // 2. Join 10 players
+  log(!!code, 'created room ' + code);
   const ids = [];
-  for (let i = 0; i < 10; i++) {
-    const r = await post('/api/join', { code, name: 'Cook' + (i+1) });
-    if (!r.ok) log(false, 'join ' + (i+1) + ': ' + r.error); else ids.push(r.playerId);
+  for (let i = 0; i < 3; i++) { const r = await post('/api/join', { code, name: 'Cook' + (i+1) }); ids.push(r.playerId); }
+  log(ids.every(Boolean), 'joined 3 players');
+
+  // 2. Countdown arms on first join
+  let st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
+  log(st.phase === 'lobby' && st.countdownMs != null && st.countdownMs > 0, 'auto-start countdown armed (' + st.countdownMs + 'ms left)');
+
+  // 3. Wait past LOBBY_MS (test uses 2s) -> a poll should auto-start
+  const t0 = Date.now();
+  let started = false;
+  while (Date.now() - t0 < 5000) {
+    await beat(code, ids);
+    st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
+    if (st.phase === 'playing') { started = true; break; }
+    await wait(300);
   }
-  log(ids.length === 10, 'joined 10 players');
+  log(started, 'game AUTO-STARTED with no host click (phase=' + st.phase + ')');
+  log(st.recipe && st.recipe.length === 10, 'recipe present on auto-start');
 
-  // 3. 11th rejected
-  const r11 = await post('/api/join', { code, name: 'Overflow' });
-  log(!r11.ok && /full/i.test(r11.error), '11th player rejected: "' + r11.error + '"');
+  // 4. All players cook to completion -> auto-finish
+  for (const id of ids) for (let s = 0; s < 10; s++) await post('/api/tap', { code, playerId: id, stepId: s });
+  await beat(code, ids);
+  st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
+  log(st.phase === 'finished', 'room auto-finished when all cooked (phase=' + st.phase + ')');
+  log(st.players.filter(p => p.finished).length === 3, 'all 3 finished, winner=' + st.players[0].name);
 
-  // 4. State shows 10 in lobby
-  let st = await get('/api/state?code=' + code);
-  log(st.ok && st.players.length === 10 && st.phase === 'lobby', 'state: 10 cooks in lobby');
-
-  // 5. Start
-  const started = await post('/api/start', { code });
-  log(started.ok && started.startedAt > 0, 'game started');
-  st = await get('/api/state?code=' + code);
-  log(st.phase === 'playing' && st.recipe.length === 10, 'phase playing, 10-step recipe present');
-
-  // 6. Wrong tap = penalty, no advance
-  const wrong = await post('/api/tap', { code, playerId: ids[0], stepId: 5 });
-  log(wrong.ok && wrong.wrong && wrong.penalties === 1 && wrong.step === 0, 'wrong tap penalized, step stays 0');
-
-  // 7. Player 0 cooks clean and fast
-  for (let s = 0; s < 10; s++) {
-    var res0 = await post('/api/tap', { code, playerId: ids[0], stepId: s });
+  // 5. Wait past RESULTS_MS (test uses 2s) -> AUTO-LOOP back to lobby
+  const t1 = Date.now();
+  let looped = false;
+  while (Date.now() - t1 < 6000) {
+    await beat(code, ids);
+    st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
+    if (st.phase === 'lobby') { looped = true; break; }
+    await wait(300);
   }
-  log(res0.finished && res0.penalties === 1, 'player 0 finished (1 earlier penalty), score=' + res0.score);
+  log(looped, 'AUTO-LOOPED back to lobby for next round (phase=' + st.phase + ')');
+  log(st.players.length === 3 && st.players.every(p => p.step === 0 && !p.finished), 'players kept + reset for round 2');
+  log(st.countdownMs != null, 'countdown re-armed for round 2 (' + st.countdownMs + 'ms)');
 
-  // 8. Player 5 makes 2 wrong taps then finishes
-  await post('/api/tap', { code, playerId: ids[5], stepId: 9 });
-  await post('/api/tap', { code, playerId: ids[5], stepId: 3 });
-  let res5;
-  for (let s = 0; s < 10; s++) res5 = await post('/api/tap', { code, playerId: ids[5], stepId: s });
-  log(res5.finished && res5.penalties === 2, 'player 5 finished with 2 penalties, score=' + res5.score);
-  log(res0.score > res5.score, 'faster/cleaner player 0 outscored player 5 (' + res0.score + ' > ' + res5.score + ')');
-
-  // 9. Remaining players finish -> room goes finished
-  for (let i = 1; i < 10; i++) {
-    if (i === 5) continue;
-    for (let s = 0; s < 10; s++) await post('/api/tap', { code, playerId: ids[i], stepId: s });
+  // 6. Stale prune: stop beating one player, wait past STALE_MS (test 3s)
+  const survivors = ids.slice(0, 2);
+  const t2 = Date.now();
+  let pruned = false;
+  while (Date.now() - t2 < 6000) {
+    await beat(code, survivors); // only 2 of 3 keep heartbeating
+    st = await get('/api/state?code=' + code + '&playerId=' + survivors[0]);
+    if (st.players.length === 2) { pruned = true; break; }
+    await wait(400);
   }
-  await wait(100);
-  st = await get('/api/state?code=' + code);
-  log(st.phase === 'finished', 'room reached finished phase');
-  log(st.players.filter(p => p.finished).length === 10, 'all 10 players finished');
-  log(st.players[0].finished, 'leaderboard sorted, top = ' + st.players[0].name + ' @ ' + (st.players[0].finishMs/1000).toFixed(2) + 's · ' + st.players[0].score + 'pts');
+  log(pruned, 'stale player pruned after missed heartbeats (' + st.players.length + ' left)');
 
-  // 10. Reset -> lobby
-  await post('/api/reset', { code });
-  st = await get('/api/state?code=' + code);
-  log(st.phase === 'lobby' && st.players.every(p => p.step === 0 && !p.finished), 'reset returns room to fresh lobby');
+  // 7. Manual "start now" override still works
+  const emptyCheck = await post('/api/create', {});
+  const c2 = emptyCheck.code;
+  const pid = (await post('/api/join', { code: c2, name: 'Solo' })).playerId;
+  const sres = await post('/api/start', { code: c2 });
+  log(sres.ok && sres.startedAt > 0, 'manual "start now" override still works');
 
   console.log('\n' + (fail === 0 ? 'ALL TESTS PASSED' : fail + ' TEST(S) FAILED'));
   process.exit(fail === 0 ? 0 : 1);

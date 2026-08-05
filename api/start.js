@@ -14,10 +14,10 @@ module.exports = async (req, res) => {
   if (playerKeys.length === 0) return send(res, 409, { ok: false, error: 'No cooks have joined yet.' });
 
   const startedAt = Date.now();
-  await hset(key, 'meta', { code, phase: 'playing', startedAt });
+  await hset(key, 'meta', { code, phase: 'playing', startedAt, deadline: null, endedAt: null });
   for (const pk of playerKeys) {
     const p = fields[pk];
-    await hset(key, pk, { ...p, step: 0, penalties: 0, finished: false, finishMs: null, score: 0 });
+    await hset(key, pk, { ...p, step: 0, penalties: 0, finished: false, finishMs: null, score: 0, lastSeen: Date.now() });
   }
   return send(res, 200, { ok: true, startedAt });
 };

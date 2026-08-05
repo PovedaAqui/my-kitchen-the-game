@@ -21,7 +21,8 @@ module.exports = async (req, res) => {
   const pk = 'p:' + playerId;
   const p = fields[pk];
   if (!p) return send(res, 404, { ok: false, error: 'Player not found.' });
-  if (p.finished) return send(res, 200, { ok: true, finished: true, score: p.score, finishMs: p.finishMs });
+  p.lastSeen = Date.now();
+  if (p.finished) { await hset(key, pk, p); return send(res, 200, { ok: true, finished: true, score: p.score, finishMs: p.finishMs }); }
 
   const startedAt = fields.meta.startedAt;
   let result;
@@ -46,7 +47,7 @@ module.exports = async (req, res) => {
   const players = Object.keys(after).filter((k) => k.startsWith('p:')).map((k) => after[k]);
   const active = players.filter((x) => x.connected);
   if (active.length > 0 && active.every((x) => x.finished) && after.meta.phase === 'playing') {
-    await hset(key, 'meta', { ...after.meta, phase: 'finished' });
+    await hset(key, 'meta', { ...after.meta, phase: 'finished', endedAt: Date.now(), deadline: null });
   }
   return send(res, 200, result);
 };
