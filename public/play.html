@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Gallo Pinto Cook-Off — Play</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: radial-gradient(circle at 50% 0%, #2b1e0c, #1a1207);
+    color: #f6ead4; min-height: 100vh; padding: 16px; overflow-x:hidden;
+  }
+  h1 { text-align:center; color:#e8a13a; font-size:1.5rem; margin-bottom:2px; }
+  h1 b { color:#b23a2e; }
+  .sub { text-align:center; color:#c9b48c; font-size:.85rem; margin-bottom:16px; }
+  .card { background:#241a0c; border:1px solid #3a2c14; border-radius:16px; padding:20px; max-width:480px; margin:0 auto; }
+  label { display:block; margin:14px 0 6px; color:#c9b48c; font-size:.9rem; }
+  input {
+    width:100%; padding:14px; border-radius:10px; border:1px solid #3a2c14;
+    background:#150f06; color:#f6ead4; font-size:1.1rem; text-align:center; letter-spacing:2px;
+  }
+  button {
+    width:100%; font-family:inherit; cursor:pointer; border:none; border-radius:12px;
+    padding:16px; font-size:1.15rem; font-weight:800; margin-top:16px;
+    background:linear-gradient(135deg,#e8a13a,#b23a2e); color:#1a1207;
+  }
+  button:disabled { opacity:.5; }
+  .hidden { display:none !important; }
+  .status { text-align:center; margin:14px 0; font-size:1rem; color:#c9b48c; min-height:1.2em; }
+  .err { color:#e58; }
+
+  /* Gameplay */
+  .progress-wrap { background:#150f06; border-radius:10px; height:14px; overflow:hidden; margin:10px 0 4px; }
+  .progress { height:100%; width:0%; background:linear-gradient(90deg,#4f9d4f,#7bc47b); transition:width .25s; }
+  .progress-txt { text-align:center; font-size:.85rem; color:#c9b48c; margin-bottom:14px; }
+  .next-title { text-align:center; color:#c9b48c; font-size:.85rem; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; }
+  .next-step {
+    text-align:center; background:#2c2010; border:2px solid #e8a13a; border-radius:14px;
+    padding:18px; margin-bottom:8px;
+  }
+  .next-step .emoji { font-size:3rem; }
+  .next-step .lbl { font-size:1.25rem; font-weight:700; margin-top:6px; color:#f6ead4; }
+  .next-step .note { font-size:.85rem; color:#c9b48c; margin-top:4px; }
+  .steps-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:14px; }
+  .step-btn {
+    background:#2c2010; border:1px solid #3a2c14; border-radius:12px; padding:14px 8px;
+    text-align:center; cursor:pointer; font-size:.9rem; transition:transform .06s, background .2s;
+    user-select:none;
+  }
+  .step-btn:active { transform:scale(.94); }
+  .step-btn .e { font-size:1.8rem; display:block; }
+  .step-btn.done { background:#1c2c1c; border-color:#4f9d4f; opacity:.6; }
+  .flash-wrong { animation: shake .3s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+  .timer { text-align:center; font-size:1.1rem; color:#e8a13a; font-weight:700; margin-bottom:6px; }
+  .penalty { text-align:center; color:#e58; font-size:.85rem; min-height:1em; }
+  .finish { text-align:center; padding:20px; }
+  .finish .big { font-size:2.2rem; color:#e8a13a; font-weight:800; }
+  .finish .medal { font-size:3.5rem; }
+</style>
+</head>
+<body>
+  <h1>Gallo Pinto <b>Cook-Off</b> 🇳🇮</h1>
+  <div class="sub">My Kitchen: The Game</div>
+
+  <!-- JOIN -->
+  <div class="card" id="joinCard">
+    <label for="room">Room code</label>
+    <input id="room" maxlength="4" placeholder="ABCD" autocapitalize="characters" autocomplete="off" />
+    <label for="name">Your cook name</label>
+    <input id="name" maxlength="16" placeholder="Chef…" style="letter-spacing:0" />
+    <button id="joinBtn">Join the Kitchen</button>
+    <div class="status err" id="joinErr"></div>
+  </div>
+
+  <!-- LOBBY -->
+  <div class="card hidden" id="lobbyCard">
+    <div class="status">✅ You're in as <b id="myName"></b>!</div>
+    <div class="status">Waiting for the host to start the round…<br>Get ready to cook! 🔥</div>
+  </div>
+
+  <!-- GAME -->
+  <div class="card hidden" id="gameCard">
+    <div class="timer" id="timer">0.0s</div>
+    <div class="progress-wrap"><div class="progress" id="progress"></div></div>
+    <div class="progress-txt" id="progressTxt">Step 0 of 10</div>
+    <div class="next-title">Next step</div>
+    <div class="next-step" id="nextStep">
+      <div class="emoji" id="nextEmoji">🍳</div>
+      <div class="lbl" id="nextLbl">…</div>
+      <div class="note" id="nextNote"></div>
+    </div>
+    <div class="penalty" id="penalty"></div>
+    <div class="steps-grid" id="grid"></div>
+  </div>
+
+  <!-- FINISH -->
+  <div class="card hidden" id="finishCard">
+    <div class="finish">
+      <div class="medal" id="finMedal">🍽️</div>
+      <div>Gallo pinto served!</div>
+      <div class="big" id="finTime">0.0s</div>
+      <div id="finScore" style="color:#c9b48c;margin-top:6px"></div>
+      <div class="status" id="finWait">Waiting for the other cooks to finish…</div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const qs = new URLSearchParams(location.search);
+    const preRoom = (qs.get('room') || '').toUpperCase();
+    if (preRoom) document.getElementById('room').value = preRoom;
+
+    let recipe = [];
+    let myStep = 0;
+    let startedAt = 0;
+    let timerInt = null;
+    let finished = false;
+
+    const $ = (id) => document.getElementById(id);
+
+    $('joinBtn').onclick = () => {
+      const code = $('room').value.toUpperCase().trim();
+      const name = $('name').value.trim();
+      if (code.length !== 4) { $('joinErr').textContent = 'Enter the 4-letter room code.'; return; }
+      $('joinBtn').disabled = true;
+      $('joinErr').textContent = '';
+      socket.emit('player:join', { code, name }, (res) => {
+        if (!res.ok) {
+          $('joinErr').textContent = res.error;
+          $('joinBtn').disabled = false;
+          return;
+        }
+        $('myName').textContent = res.name;
+        show('lobbyCard');
+      });
+    };
+
+    socket.on('game:start', ({ recipe: r, startedAt: s }) => {
+      recipe = r; startedAt = s; myStep = 0; finished = false;
+      renderGrid();
+      renderNext();
+      show('gameCard');
+      if (timerInt) clearInterval(timerInt);
+      timerInt = setInterval(updateTimer, 100);
+    });
+
+    socket.on('game:reset', () => {
+      finished = false; myStep = 0;
+      if (timerInt) clearInterval(timerInt);
+      show('lobbyCard');
+    });
+
+    socket.on('player:progress', ({ step }) => { myStep = step; renderNext(); renderGrid(); });
+    socket.on('player:wrong', ({ penalties }) => {
+      $('penalty').textContent = '❌ Wrong step! (' + penalties + ' penalt' + (penalties===1?'y':'ies') + ')';
+      $('nextStep').classList.remove('flash-wrong'); void $('nextStep').offsetWidth;
+      $('nextStep').classList.add('flash-wrong');
+    });
+    socket.on('player:finished', ({ finishMs, score }) => {
+      finished = true;
+      if (timerInt) clearInterval(timerInt);
+      $('finTime').textContent = (finishMs/1000).toFixed(1) + 's';
+      $('finScore').textContent = score + ' points';
+      show('finishCard');
+    });
+    socket.on('game:over', (state) => {
+      const me = state.players.find(p => p.id === socket.id);
+      const rank = state.players.filter(p=>p.finished).findIndex(p => p.id === socket.id);
+      if (me && me.finished) {
+        $('finMedal').textContent = ['🥇','🥈','🥉'][rank] || '🍽️';
+        $('finWait').textContent = rank === 0 ? '🏆 You won! First to serve!' : 'You placed #' + (rank+1) + '. Nicely cooked!';
+      }
+    });
+    socket.on('host:left', () => {
+      if (timerInt) clearInterval(timerInt);
+      alert('The host closed the kitchen.');
+      show('joinCard'); $('joinBtn').disabled = false;
+    });
+
+    function updateTimer() {
+      if (finished) return;
+      $('timer').textContent = ((Date.now() - startedAt)/1000).toFixed(1) + 's';
+    }
+
+    function renderNext() {
+      if (myStep >= recipe.length) return;
+      const s = recipe[myStep];
+      $('nextEmoji').textContent = s.emoji;
+      $('nextLbl').textContent = s.label;
+      $('nextNote').textContent = s.note;
+      const pct = Math.round((myStep / recipe.length) * 100);
+      $('progress').style.width = pct + '%';
+      $('progressTxt').textContent = 'Step ' + myStep + ' of ' + recipe.length;
+    }
+
+    function renderGrid() {
+      $('grid').innerHTML = recipe.map((s) => {
+        const done = s.id < myStep ? ' done' : '';
+        return '<div class="step-btn' + done + '" data-id="' + s.id + '">'
+          + '<span class="e">' + s.emoji + '</span>' + escapeHtml(s.label) + '</div>';
+      }).join('');
+      [...$('grid').querySelectorAll('.step-btn')].forEach((btn) => {
+        btn.onclick = () => {
+          if (finished) return;
+          const id = parseInt(btn.dataset.id, 10);
+          socket.emit('player:tap', { stepId: id });
+        };
+      });
+    }
+
+    function show(id) {
+      ['joinCard','lobbyCard','gameCard','finishCard'].forEach(c => $(c).classList.add('hidden'));
+      $(id).classList.remove('hidden');
+    }
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  </script>
+</body>
+</html>
