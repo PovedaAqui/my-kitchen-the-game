@@ -1,6 +1,7 @@
 const { hset, hgetall, roomKey } = require('../lib/store');
 const { newPlayerId, MAX_PLAYERS, RECIPE } = require('../lib/recipe');
 const { readBody, send } = require('../lib/http');
+const stats = require('../lib/stats');
 
 /** POST /api/join { code, name } -> registers a player, returns playerId. */
 module.exports = async (req, res) => {
@@ -19,5 +20,7 @@ module.exports = async (req, res) => {
   await hset(key, 'p:' + id, {
     id, name, step: 0, penalties: 0, finished: false, finishMs: null, score: 0, connected: true, lastSeen: Date.now()
   });
+  await stats.bump({ playersJoined: 1 });
+  await stats.trackMax('mostPlayersInRoom', playerCount + 1);
   return send(res, 200, { ok: true, code, playerId: id, name, recipeLength: RECIPE.length });
 };

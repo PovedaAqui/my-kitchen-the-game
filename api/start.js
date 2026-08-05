@@ -1,6 +1,7 @@
 const { hset, hgetall, roomKey } = require('../lib/store');
 const { makeOrder } = require('../lib/recipe');
 const { readBody, send } = require('../lib/http');
+const stats = require('../lib/stats');
 
 /** POST /api/start { code } -> manual override: flips room to playing with a fresh shuffled order. */
 module.exports = async (req, res) => {
@@ -20,5 +21,6 @@ module.exports = async (req, res) => {
     const p = fields[pk];
     await hset(key, pk, { ...p, step: 0, penalties: 0, finished: false, finishMs: null, score: 0, lastSeen: Date.now() });
   }
+  await stats.recordEvent({ type: 'roundStarted', players: playerKeys.length });
   return send(res, 200, { ok: true, startedAt });
 };

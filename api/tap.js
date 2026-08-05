@@ -1,6 +1,7 @@
 const { hset, hgetall, roomKey } = require('../lib/store');
 const { RECIPE, computeScore, publicRoomState } = require('../lib/recipe');
 const { readBody, send } = require('../lib/http');
+const stats = require('../lib/stats');
 
 /**
  * POST /api/tap { code, playerId, stepId }
@@ -50,6 +51,11 @@ module.exports = async (req, res) => {
   const active = players.filter((x) => x.connected);
   if (active.length > 0 && active.every((x) => x.finished) && after.meta.phase === 'playing') {
     await hset(key, 'meta', { ...after.meta, phase: 'finished', endedAt: Date.now(), deadline: null });
+    await stats.recordEvent({
+      type: 'roundFinished',
+      timedOut: false,
+      players: active.map((x) => ({ finishMs: x.finishMs, score: x.score, penalties: x.penalties, timedOut: !!x.timedOut }))
+    });
   }
   return send(res, 200, result);
 };

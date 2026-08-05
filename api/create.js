@@ -2,6 +2,7 @@ const QRCode = require('qrcode');
 const { hset, hgetall, roomKey } = require('../lib/store');
 const { makeRoomCode, MAX_PLAYERS, RECIPE } = require('../lib/recipe');
 const { send } = require('../lib/http');
+const stats = require('../lib/stats');
 
 /** POST /api/create -> creates a fresh room, returns code + join URL + QR. */
 module.exports = async (req, res) => {
@@ -13,6 +14,7 @@ module.exports = async (req, res) => {
     if (!exists) break;
   }
   await hset(roomKey(code), 'meta', { code, phase: 'lobby', startedAt: null });
+  await stats.bump({ roomsCreated: 1 });
 
   const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
   const host = req.headers['x-forwarded-host'] || req.headers.host;

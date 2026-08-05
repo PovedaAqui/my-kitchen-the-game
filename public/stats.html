@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gallo Pinto Cook-Off — Stats</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: radial-gradient(circle at 20% 10%, #2b1e0c, #1a1207); color: #f6ead4; min-height: 100vh; padding: 24px; }
+  header { text-align: center; margin-bottom: 20px; }
+  h1 { font-size: 2rem; color: #e8a13a; }
+  h1 span { color: #b23a2e; }
+  .sub { color: #c9b48c; margin-top: 4px; font-size: .9rem; }
+  .gate, .board { max-width: 900px; margin: 0 auto; }
+  .card { background:#241a0c; border:1px solid #3a2c14; border-radius:16px; padding:22px; box-shadow:0 8px 30px rgba(0,0,0,.4); }
+  .gate .card { max-width: 420px; margin: 40px auto; text-align:center; }
+  input { width:100%; padding:14px; border-radius:10px; border:1px solid #3a2c14; background:#150f06; color:#f6ead4; font-size:1rem; margin-top:12px; }
+  button { font-family:inherit; cursor:pointer; border:none; border-radius:10px; padding:13px 22px; font-size:1rem; font-weight:700; margin-top:14px; background:linear-gradient(135deg,#e8a13a,#b23a2e); color:#1a1207; }
+  .err { color:#e58; margin-top:10px; min-height:1.2em; font-size:.9rem; }
+  .section-title { color:#e8a13a; font-size:1.2rem; margin:22px 0 12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
+  .stat { background:#2c2010; border:1px solid #3a2c14; border-radius:12px; padding:16px; }
+  .stat .label { color:#c9b48c; font-size:.8rem; text-transform:uppercase; letter-spacing:.5px; }
+  .stat .value { color:#f6ead4; font-size:1.9rem; font-weight:800; margin-top:6px; }
+  .stat .value.accent { color:#e8a13a; }
+  .stat .value.green { color:#7bc47b; }
+  .meta-note { text-align:center; color:#c9b48c; font-size:.82rem; margin-top:18px; }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .toolbar button { margin-top:0; padding:9px 16px; font-size:.85rem; }
+  .toolbar .secondary { background:#3a2c14; color:#f6ead4; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Gallo Pinto <span>Cook-Off</span> — Stats 📊</h1>
+    <div class="sub">Aggregate usage since instrumentation</div>
+  </header>
+
+  <div class="gate" id="gate">
+    <div class="card">
+      <div>Enter the stats access token:</div>
+      <input id="token" type="password" placeholder="STATS_TOKEN" autocomplete="off" />
+      <button id="go">View stats</button>
+      <div class="err" id="err"></div>
+    </div>
+  </div>
+
+  <div class="board hidden" id="board">
+    <div class="card">
+      <div class="toolbar">
+        <div class="meta-note" id="since" style="margin:0"></div>
+        <div>
+          <button id="refresh" class="secondary">Refresh</button>
+          <button id="logout" class="secondary">Forget token</button>
+        </div>
+      </div>
+
+      <div class="section-title">Totals</div>
+      <div class="grid" id="totals"></div>
+
+      <div class="section-title">Engagement</div>
+      <div class="grid" id="engagement"></div>
+
+      <div class="section-title">Gameplay</div>
+      <div class="grid" id="gameplay"></div>
+
+      <div class="meta-note">Stats accrue from deploy time only — activity before instrumentation is not recorded. Counters are cumulative (all-time), not reset daily.</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const KEY = 'gp_stats_token';
+    let token = localStorage.getItem(KEY) || '';
+
+    function card(label, value, cls) {
+      return '<div class="stat"><div class="label">' + label + '</div><div class="value ' + (cls||'') + '">' + value + '</div></div>';
+    }
+
+    async function load() {
+      $('err').textContent = '';
+      let res;
+      try { res = await fetch('/api/stats?token=' + encodeURIComponent(token)); }
+      catch { $('err').textContent = 'Network error.'; return false; }
+      if (res.status === 401) { $('err').textContent = 'Invalid token.'; return false; }
+      if (res.status === 503) { $('err').textContent = 'Stats are not enabled on the server (STATS_TOKEN unset).'; return false; }
+      const d = await res.json();
+      if (!d.ok) { $('err').textContent = d.error || 'Error.'; return false; }
+
+      const t = d.totals, e = d.engagement, g = d.gameplay;
+      $('totals').innerHTML =
+        card('Rooms created', t.roomsCreated, 'accent') +
+        card('Players joined', t.playersJoined, 'accent') +
+        card('Rounds started', t.roundsStarted) +
+        card('Rounds finished', t.roundsFinished) +
+        card('Players finished', t.playersFinished, 'green') +
+        card('Players timed out', t.playersTimedOut);
+      $('engagement').innerHTML =
+        card('Avg players / round', e.avgPlayersPerRound) +
+        card('Avg rounds / room', e.avgRoundsPerRoom) +
+        card('Round completion', (e.roundCompletionRate * 100).toFixed(1) + '%', 'green') +
+        card('Timed-out rounds', e.timedOutRounds);
+      $('gameplay').innerHTML =
+        card('Avg finish time', g.avgFinishSec ? g.avgFinishSec + 's' : '—') +
+        card('Fastest finish', g.fastestFinishSec != null ? g.fastestFinishSec + 's' : '—', 'accent') +
+        card('High score', g.highScore != null ? g.highScore : '—', 'accent') +
+        card('Most players in a room', g.mostPlayersInRoom != null ? g.mostPlayersInRoom : '—') +
+        card('Avg penalties / finish', g.avgPenaltiesPerFinish);
+
+      $('since').textContent = d.since ? 'Collecting since ' + new Date(d.since).toLocaleString() : '';
+      return true;
+    }
+
+    async function enter() {
+      token = $('token').value.trim();
+      if (!token) { $('err').textContent = 'Enter a token.'; return; }
+      const ok = await load();
+      if (ok) {
+        localStorage.setItem(KEY, token);
+        $('gate').classList.add('hidden');
+        $('board').classList.remove('hidden');
+      }
+    }
+
+    $('go').onclick = enter;
+    $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') enter(); });
+    $('refresh').onclick = load;
+    $('logout').onclick = () => { localStorage.removeItem(KEY); location.reload(); };
+
+    // Auto-enter if a token is remembered.
+    if (token) {
+      load().then((ok) => {
+        if (ok) { $('gate').classList.add('hidden'); $('board').classList.remove('hidden'); }
+        else { localStorage.removeItem(KEY); }
+      });
+    }
+  </script>
+</body>
+</html>

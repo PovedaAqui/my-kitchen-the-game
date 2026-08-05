@@ -16,9 +16,10 @@ const routes = {
   '/api/start': require('./api/start'),
   '/api/tap': require('./api/tap'),
   '/api/state': require('./api/state'),
-  '/api/reset': require('./api/reset')
+  '/api/reset': require('./api/reset'),
+  '/api/stats': require('./api/stats')
 };
-const pages = { '/': 'host.html', '/host': 'host.html', '/play': 'play.html' };
+const pages = { '/': 'host.html', '/host': 'host.html', '/play': 'play.html', '/stats': 'stats.html' };
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
 const server = http.createServer((req, res) => {

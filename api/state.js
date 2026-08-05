@@ -2,6 +2,7 @@ const { hgetall, hset, hdel, roomKey } = require('../lib/store');
 const { publicRoomState } = require('../lib/recipe');
 const { advance, LOBBY_MS } = require('../lib/lifecycle');
 const { send } = require('../lib/http');
+const stats = require('../lib/stats');
 
 /**
  * GET /api/state?code=XXXX[&playerId=YYY]
@@ -27,11 +28,13 @@ module.exports = async (req, res) => {
   }
 
   // Advance lifecycle and persist any resulting mutations.
-  const writes = advance(fields, now);
+  const { writes, events } = advance(fields, now);
   for (const w of writes) {
     if (w.value === null) await hdel(key, w.field);
     else await hset(key, w.field, w.value);
   }
+  // Record analytics for any lifecycle transitions (fire-and-forget).
+  for (const ev of events) await stats.recordEvent(ev);
 
   const state = publicRoomState(fields);
   // Expose countdown remaining (ms) so clients can render it without clock skew.

@@ -6,6 +6,7 @@
   "rewrites": [
     { "source": "/", "destination": "/host.html" },
     { "source": "/host", "destination": "/host.html" },
-    { "source": "/play", "destination": "/play.html" }
+    { "source": "/play", "destination": "/play.html" },
+    { "source": "/stats", "destination": "/stats.html" }
   ]
 }
