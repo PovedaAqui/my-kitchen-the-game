@@ -95,7 +95,7 @@
 
     let code = null, playerId = null;
     let myFinish = { sec: null, score: null, rank: null }; // for the share button
-    let recipe = [], order = [], myStep = 0, startedAt = 0, finished = false;
+    let recipe = [], layout = [], myStep = 0, startedAt = 0, finished = false;
     let timerInt = null, pollInt = null, lastPhase = 'lobby';
 
     async function api(path, opts) { const r = await fetch(path, opts); return r.json(); }
@@ -121,7 +121,7 @@
       if (!state.ok) return;
 
       if (state.phase === 'playing' && lastPhase !== 'playing') {
-        recipe = state.recipe; order = state.order || recipe.map(r => r.id); startedAt = state.startedAt; finished = false;
+        recipe = state.recipe; layout = state.layout || recipe.map(r => r.id); startedAt = state.startedAt; finished = false;
         const me = state.players.find(p => p.id === playerId);
         myStep = me ? me.step : 0;
         $('penalty').textContent = '';
@@ -171,7 +171,7 @@
         $('penalty').textContent = '❌ Wrong step! (' + r.penalties + ' penalt' + (r.penalties===1?'y':'ies') + ')';
         $('nextStep').classList.remove('flash-wrong'); void $('nextStep').offsetWidth; $('nextStep').classList.add('flash-wrong');
       } else if (r.finished) {
-        finished = true; myStep = order.length;
+        finished = true; myStep = recipe.length;
         if (timerInt) clearInterval(timerInt);
         $('finTime').textContent = (r.finishMs/1000).toFixed(1) + 's';
         $('finScore').textContent = r.score + ' points';
@@ -185,20 +185,21 @@
     function updateTimer() { if (!finished) $('timer').textContent = ((Date.now() - startedAt)/1000).toFixed(1) + 's'; }
 
     function renderNext() {
-      if (myStep >= order.length) return;
-      const s = recipe[order[myStep]];
+      // Play order is FIXED: the next step is always recipe[myStep].
+      if (myStep >= recipe.length) return;
+      const s = recipe[myStep];
       $('nextEmoji').textContent = s.emoji; $('nextLbl').textContent = s.label; $('nextNote').textContent = s.note;
-      const pct = Math.round((myStep / order.length) * 100);
+      const pct = Math.round((myStep / recipe.length) * 100);
       $('progress').style.width = pct + '%';
-      $('progressTxt').textContent = 'Step ' + myStep + ' of ' + order.length;
+      $('progressTxt').textContent = 'Step ' + myStep + ' of ' + recipe.length;
     }
 
     function renderGrid() {
-      // Buttons are laid out in the shuffled order; a step is "done" once its
-      // position in the order is before the player's current step.
-      $('grid').innerHTML = order.map((rid, pos) => {
+      // Tiles are placed in the shuffled per-round LAYOUT so their position moves
+      // each round; a tile is "done" once its recipe id is before the fixed step.
+      $('grid').innerHTML = layout.map((rid) => {
         const s = recipe[rid];
-        const done = pos < myStep ? ' done' : '';
+        const done = s.id < myStep ? ' done' : '';
         return '<div class="step-btn' + done + '" data-id="' + s.id + '"><span class="e">' + s.emoji + '</span>' + escapeHtml(s.label) + '</div>';
       }).join('');
       [...$('grid').querySelectorAll('.step-btn')].forEach((btn) => {

@@ -29,14 +29,14 @@ const raw = (p) => fetch(BASE + p);
   await post('/api/start', { code });
   let st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
   await wait(60); // let a little time pass so finishMs is realistic (>0)
-  for (const id of ids) for (const s of st.order) await post('/api/tap', { code, playerId: id, stepId: s });
+  for (const id of ids) for (let s = 0; s < 10; s++) await post('/api/tap', { code, playerId: id, stepId: s });
   await get('/api/state?code=' + code + '&playerId=' + ids[0]);
   // Reset to lobby, round 2
   await post('/api/reset', { code });
   await post('/api/start', { code });
   st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
   await wait(60);
-  for (const id of ids) for (const s of st.order) await post('/api/tap', { code, playerId: id, stepId: s });
+  for (const id of ids) for (let s = 0; s < 10; s++) await post('/api/tap', { code, playerId: id, stepId: s });
   await get('/api/state?code=' + code + '&playerId=' + ids[0]);
 
   await wait(200);

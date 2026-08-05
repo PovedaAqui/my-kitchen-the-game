@@ -33,11 +33,20 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   }
   log(started, 'game AUTO-STARTED with no host click (phase=' + st.phase + ')');
   log(st.recipe && st.recipe.length === 10, 'recipe present on auto-start');
-  log(Array.isArray(st.order) && st.order.length === 10 && st.order[0] === 0 && st.order[9] === 9, 'shuffled order present, anchored [0..9]: ' + JSON.stringify(st.order));
-  const order = st.order;
+  const layout = st.layout;
+  const sortedLayout = layout ? [...layout].sort((a,b)=>a-b).join(',') : '';
+  log(Array.isArray(layout) && layout.length === 10 && sortedLayout === '0,1,2,3,4,5,6,7,8,9', 'shuffled display layout present (all 10 ids): ' + JSON.stringify(layout));
+  log(layout && layout.join(',') !== '0,1,2,3,4,5,6,7,8,9', 'layout is actually shuffled (not canonical)');
 
-  // 4. All players cook FOLLOWING THE SHUFFLED ORDER -> auto-finish
-  for (const id of ids) for (const stepId of order) await post('/api/tap', { code, playerId: id, stepId });
+  // 3b. Play order is FIXED: tapping out of canonical sequence is penalized.
+  await post('/api/tap', { code, playerId: ids[0], stepId: 0 }); // correct first step
+  const wrongTap = await post('/api/tap', { code, playerId: ids[0], stepId: 5 }); // should be 1
+  log(wrongTap.wrong === true, 'out-of-order tap penalized (fixed play order enforced)');
+  // correct it so this player can still finish cleanly with the rest
+  for (let s = 1; s < 10; s++) await post('/api/tap', { code, playerId: ids[0], stepId: s });
+
+  // 4. Remaining players cook in FIXED canonical order 0..9 -> auto-finish
+  for (const id of ids.slice(1)) for (let stepId = 0; stepId < 10; stepId++) await post('/api/tap', { code, playerId: id, stepId });
   await beat(code, ids);
   st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
   log(st.phase === 'finished', 'room auto-finished when all cooked (phase=' + st.phase + ')');
@@ -75,25 +84,24 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   const sres = await post('/api/start', { code: c2 });
   log(sres.ok && sres.startedAt > 0, 'manual "start now" override still works');
 
-  // 8. Randomness: wrong-order tap penalized + order varies across rounds.
+  // 8. Randomness: display layout varies across rounds; play order stays fixed.
   const s2 = await get('/api/state?code=' + c2 + '&playerId=' + pid);
-  const ord2 = s2.order;
-  log(ord2 && ord2[0] === 0 && ord2[9] === 9, 'manual start also produced shuffled order: ' + JSON.stringify(ord2));
-  // Tap correct first step, then a deliberately out-of-order id.
-  await post('/api/tap', { code: c2, playerId: pid, stepId: ord2[0] });
-  const badId = [1,2,3,4,5,6,7,8].find((x) => x !== ord2[1]);
-  const bad = await post('/api/tap', { code: c2, playerId: pid, stepId: badId });
-  log(bad.wrong === true, 'wrong-order tap rejected as penalty (tapped ' + badId + ', expected ' + ord2[1] + ')');
-  // Sample several fresh rounds; expect at least 2 distinct orders.
+  const lay2 = s2.layout;
+  log(lay2 && [...lay2].sort((a,b)=>a-b).join(',') === '0,1,2,3,4,5,6,7,8,9', 'manual start also produced a shuffled layout: ' + JSON.stringify(lay2));
+  // Play order is fixed: correct first step is always id 0, and id !=1 after it is wrong.
+  await post('/api/tap', { code: c2, playerId: pid, stepId: 0 });
+  const bad = await post('/api/tap', { code: c2, playerId: pid, stepId: 7 });
+  log(bad.wrong === true, 'out-of-order tap rejected as penalty (fixed play order)');
+  // Sample several fresh rounds; expect at least 2 distinct layouts.
   const seen = new Set();
   for (let i = 0; i < 6; i++) {
     const cc = (await post('/api/create', {})).code;
     const ppid = (await post('/api/join', { code: cc, name: 'S' })).playerId;
     await post('/api/start', { code: cc });
     const ss = await get('/api/state?code=' + cc + '&playerId=' + ppid);
-    seen.add(JSON.stringify(ss.order));
+    seen.add(JSON.stringify(ss.layout));
   }
-  log(seen.size >= 2, 'order varies across rounds (' + seen.size + ' distinct in 6 samples)');
+  log(seen.size >= 2, 'display layout varies across rounds (' + seen.size + ' distinct in 6 samples)');
 
   console.log('\n' + (fail === 0 ? 'ALL TESTS PASSED' : fail + ' TEST(S) FAILED'));
   process.exit(fail === 0 ? 0 : 1);
