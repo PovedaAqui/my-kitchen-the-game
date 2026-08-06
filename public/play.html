@@ -221,7 +221,10 @@
 
     // Share score via native share sheet (mobile) or clipboard fallback (desktop).
     $('shareBtn').onclick = async () => {
-      const url = location.origin + '/play';
+      // Share the direct fixed-room join link so recipients skip the code entry
+      // (same frictionless flow as scanning the QR: just a name + tap).
+      const room = code || preRoom || 'GAME';
+      const url = location.origin + '/play?room=' + room;
       const rankPart = myFinish.rank ? (myFinish.rank === 1 ? ' and WON 🥇' : ' (placed #' + myFinish.rank + ')') : '';
       const scorePart = myFinish.score != null ? myFinish.score + ' pts' : '';
       const timePart = myFinish.sec != null ? ' in ' + myFinish.sec + 's' : '';
