@@ -47,7 +47,7 @@
   <div class="sub">My Kitchen: The Game</div>
 
   <div class="card" id="joinCard">
-    <label for="room">Room code</label>
+    <label for="room" id="roomLabel">Room code</label>
     <input id="room" maxlength="4" placeholder="ABCD" autocapitalize="characters" autocomplete="off" />
     <label for="name">Your cook name</label>
     <input id="name" maxlength="16" placeholder="Chef…" style="letter-spacing:0" />
@@ -91,7 +91,13 @@
     const $ = (id) => document.getElementById(id);
     const qs = new URLSearchParams(location.search);
     const preRoom = (qs.get('room') || '').toUpperCase();
-    if (preRoom) $('room').value = preRoom;
+    if (preRoom) {
+      $('room').value = preRoom;
+      // Arrived via the QR / a direct join link: the room is already known, so
+      // hide the code field and just ask for a name.
+      $('room').classList.add('hidden');
+      $('roomLabel').classList.add('hidden');
+    }
 
     let code = null, playerId = null;
     let myFinish = { sec: null, score: null, rank: null }; // for the share button

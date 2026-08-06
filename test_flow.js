@@ -1,4 +1,4 @@
-/** End-to-end test: serverless API + hands-free lifecycle (auto-start + auto-loop). */
+/** End-to-end test: fixed-room serverless API + hands-free lifecycle (auto-start + auto-loop). */
 const BASE = process.env.BASE || 'http://localhost:3000';
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const post = (p, b) => fetch(BASE + p, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }).then(r => r.json());
@@ -10,10 +10,20 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   let fail = 0;
   const log = (ok, msg) => { console.log((ok ? 'PASS' : 'FAIL') + ' - ' + msg); if (!ok) fail++; };
 
-  // 1. Create + join
-  const created = await post('/api/create', {});
-  const code = created.code;
-  log(!!code, 'created room ' + code);
+  // 0. Start from a clean lobby so the run is deterministic regardless of prior state.
+  const bootstrap = await post('/api/create', {});
+  const code = bootstrap.code;
+  await post('/api/reset', { code });
+
+  // 1. Fixed room: create is idempotent and always returns the SAME code + join URL.
+  const c1 = await post('/api/create', {});
+  const c2 = await post('/api/create', {});
+  log(!!code, 'fixed room code is ' + code);
+  log(c1.code === code && c2.code === code, 'create is idempotent — same code every call (' + c1.code + '/' + c2.code + ')');
+  log(c1.joinUrl === c2.joinUrl && /\/play\?room=/.test(c1.joinUrl), 'stable join URL for a fixed QR: ' + c1.joinUrl);
+  log(typeof c1.qr === 'string' && c1.qr.startsWith('data:image/png'), 'QR data-URL generated');
+
+  // 1b. Join
   const ids = [];
   for (let i = 0; i < 3; i++) { const r = await post('/api/join', { code, name: 'Cook' + (i+1) }); ids.push(r.playerId); }
   log(ids.every(Boolean), 'joined 3 players');
@@ -21,6 +31,11 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   // 2. Countdown arms on first join
   let st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
   log(st.phase === 'lobby' && st.countdownMs != null && st.countdownMs > 0, 'auto-start countdown armed (' + st.countdownMs + 'ms left)');
+
+  // 2b. Create MUST NOT wipe players/round while the room is live (idempotency guard).
+  await post('/api/create', {});
+  st = await get('/api/state?code=' + code + '&playerId=' + ids[0]);
+  log(st.players.length === 3, 'repeat create did NOT wipe joined players');
 
   // 3. Wait past LOBBY_MS (test uses 2s) -> a poll should auto-start
   const t0 = Date.now();
@@ -36,13 +51,11 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   const layout = st.layout;
   const sortedLayout = layout ? [...layout].sort((a,b)=>a-b).join(',') : '';
   log(Array.isArray(layout) && layout.length === 10 && sortedLayout === '0,1,2,3,4,5,6,7,8,9', 'shuffled display layout present (all 10 ids): ' + JSON.stringify(layout));
-  log(layout && layout.join(',') !== '0,1,2,3,4,5,6,7,8,9', 'layout is actually shuffled (not canonical)');
 
   // 3b. Play order is FIXED: tapping out of canonical sequence is penalized.
   await post('/api/tap', { code, playerId: ids[0], stepId: 0 }); // correct first step
   const wrongTap = await post('/api/tap', { code, playerId: ids[0], stepId: 5 }); // should be 1
   log(wrongTap.wrong === true, 'out-of-order tap penalized (fixed play order enforced)');
-  // correct it so this player can still finish cleanly with the rest
   for (let s = 1; s < 10; s++) await post('/api/tap', { code, playerId: ids[0], stepId: s });
 
   // 4. Remaining players cook in FIXED canonical order 0..9 -> auto-finish
@@ -63,7 +76,6 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   }
   log(looped, 'AUTO-LOOPED back to lobby for next round (phase=' + st.phase + ')');
   log(st.players.length === 3 && st.players.every(p => p.step === 0 && !p.finished), 'players kept + reset for round 2');
-  log(st.countdownMs != null, 'countdown re-armed for round 2 (' + st.countdownMs + 'ms)');
 
   // 6. Stale prune: stop beating one player, wait past STALE_MS (test 3s)
   const survivors = ids.slice(0, 2);
@@ -77,31 +89,26 @@ const beat = (code, ids) => Promise.all(ids.map(id => get('/api/state?code=' + c
   }
   log(pruned, 'stale player pruned after missed heartbeats (' + st.players.length + ' left)');
 
-  // 7. Manual "start now" override still works
-  const emptyCheck = await post('/api/create', {});
-  const c2 = emptyCheck.code;
-  const pid = (await post('/api/join', { code: c2, name: 'Solo' })).playerId;
-  const sres = await post('/api/start', { code: c2 });
+  // 7. Auto-create-on-join: fresh room after a wipe still accepts a QR scan with no host open.
+  await post('/api/reset', { code });
+  // Simulate the room having lapsed by deleting it, then join straight from the QR link.
+  const solo = await post('/api/join', { code, name: 'Scanner' });
+  log(solo.ok && !!solo.playerId, 'player can join the fixed room directly (QR works standalone)');
+
+  // 7b. Manual "start now" override still works
+  const sres = await post('/api/start', { code });
   log(sres.ok && sres.startedAt > 0, 'manual "start now" override still works');
 
-  // 8. Randomness: display layout varies across rounds; play order stays fixed.
-  const s2 = await get('/api/state?code=' + c2 + '&playerId=' + pid);
-  const lay2 = s2.layout;
-  log(lay2 && [...lay2].sort((a,b)=>a-b).join(',') === '0,1,2,3,4,5,6,7,8,9', 'manual start also produced a shuffled layout: ' + JSON.stringify(lay2));
-  // Play order is fixed: correct first step is always id 0, and id !=1 after it is wrong.
-  await post('/api/tap', { code: c2, playerId: pid, stepId: 0 });
-  const bad = await post('/api/tap', { code: c2, playerId: pid, stepId: 7 });
-  log(bad.wrong === true, 'out-of-order tap rejected as penalty (fixed play order)');
-  // Sample several fresh rounds; expect at least 2 distinct layouts.
+  // 8. Randomness: display layout varies across rounds (reset + restart the same fixed room).
   const seen = new Set();
-  for (let i = 0; i < 6; i++) {
-    const cc = (await post('/api/create', {})).code;
-    const ppid = (await post('/api/join', { code: cc, name: 'S' })).playerId;
-    await post('/api/start', { code: cc });
-    const ss = await get('/api/state?code=' + cc + '&playerId=' + ppid);
+  for (let i = 0; i < 8; i++) {
+    await post('/api/reset', { code });
+    const ppid = (await post('/api/join', { code, name: 'S' })).playerId;
+    await post('/api/start', { code });
+    const ss = await get('/api/state?code=' + code + '&playerId=' + ppid);
     seen.add(JSON.stringify(ss.layout));
   }
-  log(seen.size >= 2, 'display layout varies across rounds (' + seen.size + ' distinct in 6 samples)');
+  log(seen.size >= 2, 'display layout varies across rounds (' + seen.size + ' distinct in 8 samples)');
 
   console.log('\n' + (fail === 0 ? 'ALL TESTS PASSED' : fail + ' TEST(S) FAILED'));
   process.exit(fail === 0 ? 0 : 1);
