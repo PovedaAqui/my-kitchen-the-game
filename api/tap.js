@@ -1,13 +1,16 @@
-const { hset, hgetall, roomKey } = require('../lib/store');
-const { RECIPE, computeScore, publicRoomState } = require('../lib/recipe');
+const { hset, hgetall, tapStep, roomKey } = require('../lib/store');
+const { RECIPE, computeScore } = require('../lib/recipe');
 const { readBody, send } = require('../lib/http');
 const stats = require('../lib/stats');
 
 /**
  * POST /api/tap { code, playerId, stepId }
  * Validates the tap against the player's current step. Correct advances;
- * wrong adds a penalty. Finishing computes the score. If every connected
- * player is finished, the room flips to `finished`.
+ * wrong adds a penalty; a tap for an already-completed step is an idempotent
+ * no-op. The step/penalty mutation is done ATOMICALLY (single Redis Lua op)
+ * so concurrent taps from a fast tapper can't race on a stale step. Finishing
+ * computes the score. If every connected player is finished, the room flips
+ * to `finished`.
  */
 module.exports = async (req, res) => {
   const body = await readBody(req);
@@ -15,46 +18,42 @@ module.exports = async (req, res) => {
   const playerId = body.playerId;
   const stepId = Number(body.stepId);
   const key = roomKey(code);
-  const fields = await hgetall(key);
-  if (!fields.meta) return send(res, 404, { ok: false, error: 'Room not found.' });
-  if (fields.meta.phase !== 'playing') return send(res, 409, { ok: false, error: 'Not in play.' });
-
   const pk = 'p:' + playerId;
-  const p = fields[pk];
-  if (!p) return send(res, 404, { ok: false, error: 'Player not found.' });
-  p.lastSeen = Date.now();
-  if (p.finished) { await hset(key, pk, p); return send(res, 200, { ok: true, finished: true, score: p.score, finishMs: p.finishMs }); }
 
-  const startedAt = fields.meta.startedAt;
-  const expectedId = p.step; // fixed canonical order: RECIPE ids 0..9 in sequence
+  // Bump this player's heartbeat (separate field) so an actively-tapping player
+  // is never pruned mid-round even if their poll is briefly delayed.
+  await hset(key, 'hb:' + playerId, Date.now());
+
+  // Atomic step advance / penalty / duplicate detection.
+  const { outcome, player: p } = await tapStep(key, pk, stepId, RECIPE.length);
+  if (outcome === 'missing') return send(res, 404, { ok: false, error: 'Player not found.' });
+  if (outcome === 'notplaying') return send(res, 409, { ok: false, error: 'Not in play.' });
+
   let result;
-  if (stepId === expectedId) {
-    p.step += 1;
-    if (p.step >= RECIPE.length) {
-      p.finished = true;
-      p.finishMs = Date.now() - startedAt;
-      p.score = computeScore(p.finishMs, p.penalties);
-      result = { ok: true, finished: true, score: p.score, finishMs: p.finishMs, penalties: p.penalties };
-    } else {
-      result = { ok: true, step: p.step };
-    }
-  } else if (stepId < expectedId) {
-    // Idempotent guard: a tap for a step already completed (a duplicate or a
-    // late-arriving retry from a fast tapper) is a harmless no-op, NOT a
-    // penalty. In fixed order, anything below the current step was already
-    // placed correctly. This absorbs client double-taps and request races.
-    result = { ok: true, step: p.step, duplicate: true };
-  } else {
-    p.penalties += 1;
+  if (outcome === 'finish') {
+    // Only ONE tap ever gets 'finish' (subsequent taps see finished=true and
+    // return 'duplicate'), so writing the score here is race-free.
+    const startedAt = (await hgetall(key)).meta.startedAt;
+    p.finishMs = Date.now() - startedAt;
+    p.score = computeScore(p.finishMs, p.penalties || 0);
+    await hset(key, pk, p);
+    result = { ok: true, finished: true, score: p.score, finishMs: p.finishMs, penalties: p.penalties || 0 };
+  } else if (outcome === 'duplicate') {
+    // Already-completed step (double-tap / late retry) or already finished.
+    result = p && p.finished
+      ? { ok: true, finished: true, score: p.score, finishMs: p.finishMs }
+      : { ok: true, step: p ? p.step : 0, duplicate: true };
+  } else if (outcome === 'wrong') {
     result = { ok: true, wrong: true, step: p.step, penalties: p.penalties };
+  } else { // 'advance'
+    result = { ok: true, step: p.step };
   }
-  await hset(key, pk, p);
 
   // Re-read to check if the whole room is done (accounts for concurrent finishers).
   const after = await hgetall(key);
   const players = Object.keys(after).filter((k) => k.startsWith('p:')).map((k) => after[k]);
   const active = players.filter((x) => x.connected);
-  if (active.length > 0 && active.every((x) => x.finished) && after.meta.phase === 'playing') {
+  if (active.length > 0 && active.every((x) => x.finished) && after.meta && after.meta.phase === 'playing') {
     await hset(key, 'meta', { ...after.meta, phase: 'finished', endedAt: Date.now(), deadline: null });
     await stats.recordEvent({
       type: 'roundFinished',
