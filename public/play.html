@@ -204,7 +204,19 @@
       lastPhase = state.phase;
     }
 
-    async function tap(id) {
+    // Taps are SERIALIZED through this promise chain so a single player never has
+    // two tap requests in flight at once. Without this, fast tapping fired
+    // concurrent requests that raced on the serverless read-modify-write: a later
+    // (correct) tap could read a stale step and be wrongly rejected. One-at-a-time
+    // sending makes every tap see the committed result of the previous one.
+    let tapChain = Promise.resolve();
+
+    function tap(id) {
+      if (finished) return;
+      tapChain = tapChain.then(() => sendTap(id)).catch(() => {});
+    }
+
+    async function sendTap(id) {
       if (finished) return;
       const r = await post('/api/tap', { code, playerId, stepId: id });
       if (!r.ok) return;

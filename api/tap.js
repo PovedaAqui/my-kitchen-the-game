@@ -38,6 +38,12 @@ module.exports = async (req, res) => {
     } else {
       result = { ok: true, step: p.step };
     }
+  } else if (stepId < expectedId) {
+    // Idempotent guard: a tap for a step already completed (a duplicate or a
+    // late-arriving retry from a fast tapper) is a harmless no-op, NOT a
+    // penalty. In fixed order, anything below the current step was already
+    // placed correctly. This absorbs client double-taps and request races.
+    result = { ok: true, step: p.step, duplicate: true };
   } else {
     p.penalties += 1;
     result = { ok: true, wrong: true, step: p.step, penalties: p.penalties };
