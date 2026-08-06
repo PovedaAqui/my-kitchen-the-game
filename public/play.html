@@ -55,6 +55,12 @@
     <div class="status err" id="joinErr"></div>
   </div>
 
+  <div class="card hidden" id="waitCard">
+    <div class="status">⏳ A round is in progress…</div>
+    <div class="status" id="waitMsg">Hang tight, <b id="waitName"></b> — you'll be dropped into the next round automatically. No need to tap anything! 🔥</div>
+    <div class="timer" id="waitDots" style="font-size:1.6rem">🍳</div>
+  </div>
+
   <div class="card hidden" id="lobbyCard">
     <div class="status">✅ You're in as <b id="myName"></b>!</div>
     <div class="status" id="lobbyMsg">Waiting for more cooks…<br>Get ready to cook! 🔥</div>
@@ -107,18 +113,48 @@
     async function api(path, opts) { const r = await fetch(path, opts); return r.json(); }
     const post = (path, body) => api(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
 
+    let waitInt = null; // background retry timer while a round is in progress
+
     $('joinBtn').onclick = async () => {
       const c = $('room').value.toUpperCase().trim();
       const name = $('name').value.trim();
       if (c.length !== 4) { $('joinErr').textContent = 'Enter the 4-letter room code.'; return; }
       $('joinBtn').disabled = true; $('joinErr').textContent = '';
-      const res = await post('/api/join', { code: c, name });
-      if (!res.ok) { $('joinErr').textContent = res.error; $('joinBtn').disabled = false; return; }
-      code = res.code; playerId = res.playerId;
-      $('myName').textContent = res.name;
-      show('lobbyCard');
-      pollInt = setInterval(poll, 700);
+      await attemptJoin(c, name);
     };
+
+    // Try to join. On success -> lobby + polling. On "round in progress" (409) ->
+    // show the waiting screen and keep retrying in the background so the player is
+    // dropped into the very next round automatically, with zero extra taps.
+    async function attemptJoin(c, name) {
+      const res = await post('/api/join', { code: c, name });
+      if (res.ok) {
+        if (waitInt) { clearInterval(waitInt); waitInt = null; }
+        code = res.code; playerId = res.playerId;
+        $('myName').textContent = res.name;
+        show('lobbyCard');
+        if (!pollInt) pollInt = setInterval(poll, 700);
+        return;
+      }
+      // Round already running: park on the waiting screen and auto-retry.
+      if (res.roundInProgress || /in progress/i.test(res.error || '')) {
+        $('waitName').textContent = name || 'Cook';
+        show('waitCard');
+        if (!waitInt) {
+          let dots = 0;
+          waitInt = setInterval(() => {
+            dots = (dots + 1) % 4;
+            $('waitDots').textContent = '🍳' + '.'.repeat(dots);
+            attemptJoin(c, name); // retry; succeeds the instant the round loops back to lobby
+          }, 1500);
+        }
+        return;
+      }
+      // Any other error (e.g. kitchen full): surface it and let them retry manually.
+      show('joinCard');
+      $('joinErr').textContent = res.error || 'Could not join. Try again.';
+      $('joinBtn').disabled = false;
+    }
 
     async function poll() {
       if (!code) return;
@@ -214,7 +250,7 @@
     }
 
     function show(id) {
-      ['joinCard','lobbyCard','gameCard','finishCard'].forEach(c => $(c).classList.add('hidden'));
+      ['joinCard','waitCard','lobbyCard','gameCard','finishCard'].forEach(c => $(c).classList.add('hidden'));
       $(id).classList.remove('hidden');
     }
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

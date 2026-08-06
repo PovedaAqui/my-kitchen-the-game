@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
     fields = await hgetall(key);
   }
   if (!fields.meta) return send(res, 404, { ok: false, error: 'Room not found.' });
-  if (fields.meta.phase === 'playing') return send(res, 409, { ok: false, error: 'Round in progress — you\'ll be in for the next one.' });
+  if (fields.meta.phase === 'playing') return send(res, 409, { ok: false, roundInProgress: true, error: 'Round in progress — you\'ll be in for the next one.' });
 
   const playerCount = Object.keys(fields).filter((k) => k.startsWith('p:')).length;
   if (playerCount >= MAX_PLAYERS) return send(res, 409, { ok: false, error: 'Kitchen is full (10 cooks max).' });
